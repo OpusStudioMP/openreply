@@ -1,5 +1,5 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
-import Resend from "next-auth/providers/resend";
+import GitHub from "next-auth/providers/github";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
@@ -9,9 +9,9 @@ type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
 export const authConfig = {
   adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
-    Resend({
-      apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
-      from: process.env.EMAIL_FROM ?? "OpenReply <login@example.com>",
+    GitHub({
+      clientId: process.env.AUTH_GITHUB_ID,
+      clientSecret: process.env.AUTH_GITHUB_SECRET,
     }),
   ],
   callbacks: {
