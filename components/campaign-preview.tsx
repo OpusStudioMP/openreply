@@ -25,6 +25,8 @@ interface CampaignPreviewProps {
   openingDmEnabled: boolean;
   openingDmMessage: string;
   openingDmButtonLabel: string;
+  followGateEnabled: boolean;
+  followGateMessage: string;
   revealMessage: string;
   hasLink: boolean;
   linkButtonLabel: string;
@@ -289,6 +291,8 @@ function DmScreen({
   openingDmEnabled,
   openingDmMessage,
   openingDmButtonLabel,
+  followGateEnabled,
+  followGateMessage,
   revealMessage,
   hasLink,
   linkButtonLabel,
@@ -298,6 +302,8 @@ function DmScreen({
   openingDmEnabled: boolean;
   openingDmMessage: string;
   openingDmButtonLabel: string;
+  followGateEnabled: boolean;
+  followGateMessage: string;
   revealMessage: string;
   hasLink: boolean;
   linkButtonLabel: string;
@@ -330,6 +336,27 @@ function DmScreen({
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
                 {openingDmButtonLabel || "Button label"}
+              </div>
+            </div>
+          </>
+        )}
+        {openingDmEnabled && followGateEnabled && (
+          <>
+            <div className="flex items-end gap-2">
+              <Avatar url={avatarUrl} size={24} />
+              <div className="max-w-[80%] overflow-hidden rounded-2xl rounded-bl-md bg-zinc-800">
+                <p className="whitespace-pre-wrap px-3 py-2 text-sm">
+                  {followGateMessage ||
+                    "Follow the account first, then tap again to get your link…"}
+                </p>
+                <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
+                  {openingDmButtonLabel || "Get the link"}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
+                {openingDmButtonLabel || "Get the link"}
               </div>
             </div>
           </>
@@ -412,6 +439,8 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             openingDmEnabled={props.openingDmEnabled}
             openingDmMessage={props.openingDmMessage}
             openingDmButtonLabel={props.openingDmButtonLabel}
+            followGateEnabled={props.followGateEnabled}
+            followGateMessage={props.followGateMessage}
             revealMessage={props.revealMessage}
             hasLink={props.hasLink}
             linkButtonLabel={props.linkButtonLabel}

@@ -26,6 +26,8 @@ interface Campaign {
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
   openingDmButtonLabel: string | null;
+  followGateEnabled: boolean;
+  followGateMessage: string | null;
   linkButtonLabel: string | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
@@ -285,6 +287,8 @@ export default function CampaignDetailPage() {
             openingDmEnabled={campaign.openingDmEnabled}
             openingDmMessage={campaign.openingDmMessage ?? ""}
             openingDmButtonLabel={campaign.openingDmButtonLabel ?? ""}
+            followGateEnabled={campaign.followGateEnabled}
+            followGateMessage={campaign.followGateMessage ?? ""}
             revealMessage={campaign.dmMessage}
             hasLink={hasLink}
             linkButtonLabel={campaign.linkButtonLabel ?? "Open link"}

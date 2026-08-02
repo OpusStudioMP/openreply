@@ -26,6 +26,8 @@ interface Campaign {
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
   openingDmButtonLabel: string | null;
+  followGateEnabled: boolean;
+  followGateMessage: string | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -237,6 +239,8 @@ export default function CampaignsPage() {
           openingDmEnabled: auto.openingDmEnabled,
           openingDmMessage: auto.openingDmMessage,
           openingDmButtonLabel: auto.openingDmButtonLabel,
+          followGateEnabled: auto.followGateEnabled,
+          followGateMessage: auto.followGateMessage,
           publicReplyEnabled: auto.publicReplyEnabled,
           publicReplyMessages: auto.publicReplyMessages,
           trackedDestinationUrl: auto.trackedLinks[0]?.destinationUrl ?? "",
@@ -431,6 +435,11 @@ export default function CampaignsPage() {
                   {auto.pendingNextReel && (
                     <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
                       Waiting for next reel
+                    </span>
+                  )}
+                  {auto.followGateEnabled && (
+                    <span className="shrink-0 rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-400">
+                      Follow gate
                     </span>
                   )}
                 </div>
