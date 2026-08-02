@@ -309,6 +309,46 @@ export async function sendDirectMessageWithLinkButton(
   return handleResponse(response);
 }
 
+/**
+ * Send a DM with a postback button. Tapping it re-fires the `messaging_postbacks`
+ * webhook with `payload`. Used by the follow-gate to re-prompt a non-follower
+ * with a "I followed, send it" button that re-checks their follow status.
+ */
+export async function sendDirectMessageWithButton(
+  accessToken: string,
+  instagramAccountId: string,
+  userId: string,
+  text: string,
+  buttonTitle: string,
+  payload: string
+): Promise<{ recipient_id: string; message_id: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { id: userId },
+        message: {
+          attachment: {
+            type: "template",
+            payload: {
+              template_type: "button",
+              text: text.slice(0, 640),
+              buttons: [{ type: "postback", title: buttonTitle.slice(0, 20), payload }],
+            },
+          },
+        },
+      }),
+    }
+  );
+
+  return handleResponse(response);
+}
+
 export async function sendCommentReply(
   accessToken: string,
   commentId: string,
@@ -464,6 +504,38 @@ export async function getUserInfo(accessToken: string): Promise<InstagramUser> {
 
   const response = await fetch(url.toString());
   return handleResponse<InstagramUser>(response);
+}
+
+export interface InstagramUserProfile {
+  id: string;
+  name?: string;
+  username?: string;
+  // Whether this user (the commenter/messager) follows the connected business.
+  is_user_follow_business?: boolean;
+  is_business_follow_user?: boolean;
+  follower_count?: number;
+}
+
+/**
+ * Fetch a commenter's messaging profile, including whether they follow the
+ * business (`is_user_follow_business`) — the field that powers follow-gating.
+ * `igsid` is the user's Instagram-scoped id (their comment author id / DM
+ * sender id). Works once the user has interacted (a comment we private-replied
+ * to, or an opening-DM button tap, grants access); a cold user returns an error.
+ */
+export async function getUserProfile(
+  accessToken: string,
+  igsid: string
+): Promise<InstagramUserProfile> {
+  const url = new URL(`${instagramGraphBase()}/${igsid}`);
+  url.searchParams.set(
+    "fields",
+    "name,username,is_user_follow_business,is_business_follow_user,follower_count"
+  );
+  url.searchParams.set("access_token", accessToken);
+
+  const response = await fetch(url.toString());
+  return handleResponse<InstagramUserProfile>(response);
 }
 
 const MEDIA_FIELDS =

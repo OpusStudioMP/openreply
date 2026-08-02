@@ -40,6 +40,8 @@ interface LoadedCampaign {
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
   openingDmButtonLabel: string | null;
+  followGateEnabled: boolean;
+  followGateMessage: string | null;
   linkButtonLabel: string | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
@@ -157,6 +159,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [openingDmEnabled, setOpeningDmEnabled] = useState(false);
   const [openingDmMessage, setOpeningDmMessage] = useState("");
   const [openingDmButtonLabel, setOpeningDmButtonLabel] = useState("");
+  const [followGateEnabled, setFollowGateEnabled] = useState(false);
+  const [followGateMessage, setFollowGateMessage] = useState("");
 
   const [dmMessage, setDmMessage] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
@@ -251,6 +255,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setOpeningDmEnabled(c.openingDmEnabled);
         setOpeningDmMessage(c.openingDmMessage ?? "");
         setOpeningDmButtonLabel(c.openingDmButtonLabel ?? "");
+        setFollowGateEnabled(c.followGateEnabled);
+        setFollowGateMessage(c.followGateMessage ?? "");
         setDmMessage(c.dmMessage);
         setLinkButtonLabel(c.linkButtonLabel ?? "Open link");
         setIsActive(c.isActive);
@@ -379,6 +385,9 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
       openingDmButtonLabel: openingDmEnabled ? openingDmButtonLabel : null,
+      followGateEnabled: openingDmEnabled && followGateEnabled,
+      followGateMessage:
+        openingDmEnabled && followGateEnabled ? followGateMessage : null,
       publicReplyEnabled,
       publicReplyMessages: publicReplyEnabled
         ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
@@ -763,6 +772,25 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   maxLength={64}
                 />
+                <div className="flex items-center justify-between border-t border-border pt-2">
+                  <span className="text-sm text-foreground">
+                    only send the link if they follow you
+                  </span>
+                  <Toggle
+                    on={followGateEnabled}
+                    onToggle={() => setFollowGateEnabled(!followGateEnabled)}
+                  />
+                </div>
+                {followGateEnabled && (
+                  <textarea
+                    value={followGateMessage}
+                    onChange={(e) => setFollowGateMessage(e.target.value)}
+                    placeholder="Almost there! Follow the account, then tap the button again to get your link 💜"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                )}
               </div>
             )}
           </div>

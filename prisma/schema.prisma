@@ -165,6 +165,8 @@ model Automation {
   publicReplyEnabled Boolean @default(false)
   publicReplyMessage String?
   publicReplyMessages String[] @default([])
+  followGateEnabled  Boolean @default(false)
+  followGateMessage  String?
   isActive       Boolean @default(true)
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
@@ -333,6 +335,7 @@ enum DmStatus {
   SKIPPED_RATE_LIMIT
   SKIPPED_PLAN_LIMIT
   SKIPPED_NO_MATCH
+  SKIPPED_NOT_FOLLOWING
 }
 
 enum WebhookStatus {

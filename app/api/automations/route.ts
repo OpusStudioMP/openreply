@@ -31,6 +31,8 @@ const createAutomationSchema = z
     openingDmMessage: z.string().max(1000).optional().nullable(),
     openingDmButtonLabel: z.string().max(64).optional().nullable(),
     linkButtonLabel: z.string().max(20).optional().nullable(),
+    followGateEnabled: z.boolean().optional().default(false),
+    followGateMessage: z.string().max(1000).optional().nullable(),
     publicReplyEnabled: z.boolean().optional().default(false),
     publicReplyMessage: z.string().max(1000).optional().nullable(),
     publicReplyMessages: z
@@ -79,6 +81,8 @@ const updateAutomationSchema = z.object({
   openingDmMessage: z.string().max(1000).optional().nullable(),
   openingDmButtonLabel: z.string().max(64).optional().nullable(),
   linkButtonLabel: z.string().max(20).optional().nullable(),
+  followGateEnabled: z.boolean().optional(),
+  followGateMessage: z.string().max(1000).optional().nullable(),
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
@@ -348,6 +352,15 @@ export async function POST(request: NextRequest) {
       openingDmButtonLabel: openingDmEnabled
         ? parsed.data.openingDmButtonLabel || null
         : null,
+      // Follow-gate only works via the opening-DM button tap, so it requires
+      // openingDmEnabled; force it off otherwise.
+      followGateEnabled: openingDmEnabled
+        ? parsed.data.followGateEnabled
+        : false,
+      followGateMessage:
+        openingDmEnabled && parsed.data.followGateEnabled
+          ? parsed.data.followGateMessage || null
+          : null,
       linkButtonLabel: parsed.data.linkButtonLabel || null,
       publicReplyEnabled: parsed.data.publicReplyEnabled,
       publicReplyMessages: parsed.data.publicReplyEnabled
@@ -444,6 +457,12 @@ export async function PATCH(request: NextRequest) {
   if (automationData.openingDmEnabled === false) {
     automationData.openingDmMessage = null;
     automationData.openingDmButtonLabel = null;
+    // No opening-DM button means no follow-gate; it can only fire on a tap.
+    automationData.followGateEnabled = false;
+    automationData.followGateMessage = null;
+  }
+  if (automationData.followGateEnabled === false) {
+    automationData.followGateMessage = null;
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {

@@ -10,8 +10,10 @@ import {
 import { prisma } from "@/lib/db/client";
 import {
   MetaApiError,
+  getUserProfile,
   sendCommentReply,
   sendDirectMessage,
+  sendDirectMessageWithButton,
   sendDirectMessageWithLinkButton,
   sendPrivateReply,
   sendPrivateReplyWithButton,
@@ -504,6 +506,73 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     accessToken = decryptToken(automation.instagramAccount.accessToken);
   } catch {
     return;
+  }
+
+  // Follow-gate: verify the tapper actually follows before revealing the link.
+  // We can read is_user_follow_business now because the button tap granted a
+  // messaging interaction. If the read fails (permission/consent edge cases),
+  // fail open — degrade to a normal reveal rather than hard-blocking everyone.
+  if (automation.followGateEnabled) {
+    let follows = true;
+    try {
+      const profile = await getUserProfile(accessToken, userId);
+      follows = profile.is_user_follow_business === true;
+    } catch (followCheckError) {
+      console.log(
+        "[DM Worker] Follow-gate check failed, revealing link anyway:",
+        formatError(followCheckError)
+      );
+    }
+
+    if (!follows) {
+      // Not following: re-prompt with a fresh button carrying the same reveal
+      // payload so they can tap again once they follow. This is a nudge, not the
+      // payload delivery, so it does not consume the workspace DM budget.
+      const promptText =
+        renderMessageWithoutLink({
+          message:
+            automation.followGateMessage ||
+            "Almost there! Follow the account first, then tap the button below to get your link.",
+          commenterName,
+        }) || "Follow the account, then tap below to get your link.";
+      try {
+        await sendDirectMessageWithButton(
+          accessToken,
+          automation.instagramAccount.instagramId,
+          userId,
+          promptText,
+          automation.openingDmButtonLabel || "Get the link",
+          `reveal:${automation.id}`
+        );
+      } catch (promptError) {
+        console.log(
+          "[DM Worker] Follow-gate prompt send failed:",
+          formatError(promptError)
+        );
+      }
+
+      await prisma.dmLog.upsert({
+        where: {
+          automationId_commentId: {
+            automationId: automation.id,
+            commentId: dedupeId,
+          },
+        },
+        create: {
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          instagramAccountId: automation.instagramAccountId,
+          commenterId: userId,
+          commenterName,
+          commentText: "(button tap)",
+          commentId: dedupeId,
+          status: "SKIPPED_NOT_FOLLOWING",
+          errorMessage: "User does not follow the account (follow-gate)",
+        },
+        update: { status: "SKIPPED_NOT_FOLLOWING" },
+      });
+      return;
+    }
   }
 
   const usage = await reserveWorkspaceDMSend(automation.workspaceId);
