@@ -219,6 +219,15 @@ export default function CampaignDetailPage() {
           </Summary>
         )}
 
+        {campaign.followGateEnabled && (
+          <Summary title="Only if they follow you">
+            <FieldBox>
+              {campaign.followGateMessage || "Follow prompt message"}
+            </FieldBox>
+            <FieldBox>{campaign.openingDmButtonLabel || "Button"}</FieldBox>
+          </Summary>
+        )}
+
         <Summary title="And then, they will get a DM">
           <FieldBox>{campaign.dmMessage}</FieldBox>
           {hasLink && (
