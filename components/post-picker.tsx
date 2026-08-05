@@ -94,8 +94,8 @@ export default function PostPicker({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-        {[...Array(8)].map((_, i) => (
+      <div className="grid grid-cols-3 lg:grid-cols-2 gap-2">
+        {[...Array(6)].map((_, i) => (
           <div key={i} className="aspect-square rounded bg-zinc-800" />
         ))}
       </div>
@@ -148,7 +148,7 @@ export default function PostPicker({
               Already used by another campaign
             </p>
           )}
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto p-1">
+          <div className="grid grid-cols-3 lg:grid-cols-2 gap-2 max-h-[28rem] overflow-y-auto p-1">
             {visible.map((post) => {
               const isSelected = selectedPostId === post.id;
               const usedByName = usedPostIds?.[post.id];
