@@ -69,6 +69,10 @@ export interface InstagramComment {
     username?: string;
   };
   timestamp: string;
+  // Set when this comment is a reply inside a thread. The media comments edge
+  // returns thread replies flattened alongside top-level comments, so this is
+  // the only way to tell them apart there.
+  parent_id?: string;
   // Present when the comments query asks for replies{from}. Used to tell whether
   // the account owner has already replied to this comment.
   replies?: {
@@ -402,7 +406,10 @@ export async function getRecentMediaComments(
   const results: InstagramComment[] = [];
 
   const first = new URL(`${instagramGraphBase()}/${mediaId}/comments`);
-  first.searchParams.set("fields", "id,text,timestamp,from,replies{from}");
+  first.searchParams.set(
+    "fields",
+    "id,text,timestamp,from,parent_id,replies{from}"
+  );
   first.searchParams.set("order", "reverse_chronological");
   first.searchParams.set("limit", "50");
   first.searchParams.set("access_token", accessToken);

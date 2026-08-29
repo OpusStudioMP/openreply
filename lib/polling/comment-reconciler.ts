@@ -237,6 +237,11 @@ async function sweepCampaign(
         commenterId: c.from!.id,
         commenterName: c.from?.username,
         mediaId,
+        // The comments edge returns thread replies flattened in with top-level
+        // comments, so the poller can surface a follow-up ("thanks!") exactly
+        // like the webhook does. Carry the parent through and let the worker's
+        // thread guard decide.
+        parentCommentId: c.parent_id ?? null,
         source: "POLLING",
       });
       stat.enqueued += 1;

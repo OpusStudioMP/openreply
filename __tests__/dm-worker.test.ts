@@ -17,6 +17,7 @@ const {
     },
     dmLog: {
       findUnique: vi.fn(),
+      create: vi.fn(),
       upsert: vi.fn(),
       update: vi.fn(),
     },
@@ -173,6 +174,7 @@ beforeEach(() => {
 
   mockPrisma.automation.findMany.mockResolvedValue([mockAutomation]);
   mockPrisma.dmLog.findUnique.mockResolvedValue(null);
+  mockPrisma.dmLog.create.mockResolvedValue({});
   mockPrisma.dmLog.upsert.mockResolvedValue({});
   mockPrisma.dmLog.update.mockResolvedValue({});
   mockPrisma.instagramAccount.findUnique.mockResolvedValue({
@@ -340,7 +342,8 @@ describe("DM Worker — Full Pipeline", () => {
       }),
       expect.objectContaining({
         delay: 1800000,
-        jobId: "comment:ig_456:comment_555:retry:1",
+        // BullMQ forbids ":" in custom job ids, so the id is underscore-joined.
+        jobId: "comment_ig_456_comment_555_retry_1",
       })
     );
   });
@@ -468,5 +471,75 @@ describe("DM Worker — Full Pipeline", () => {
       "Get offer",
       "http://localhost:3000/r/abc123"
     );
+  });
+});
+
+
+describe("DM Worker — thread replies", () => {
+  // Instagram flattens threads: a reply to the campaign's public reply arrives
+  // as a new comment carrying the ORIGINAL top-level comment as its parent.
+  const replyJobData = {
+    ...mockJobData,
+    commentId: "comment_reply_777",
+    commentText: "@account thanks, got it!",
+    parentCommentId: "comment_555",
+  };
+
+  /** findUnique answers per commentId so the parent lookup is distinguishable. */
+  function logsByCommentId(map: Record<string, unknown>) {
+    mockPrisma.dmLog.findUnique.mockImplementation(
+      async ({ where }: { where: { automationId_commentId: { commentId: string } } }) =>
+        map[where.automationId_commentId.commentId] ?? null
+    );
+  }
+
+  it("does not re-fire when the original commenter replies in an answered thread", async () => {
+    logsByCommentId({
+      comment_555: { commenterId: "commenter_999", status: "SENT" },
+    });
+
+    const processor = getProcessor();
+    await processor(createMockJob(replyJobData));
+
+    expect(mockSendPrivateReply).not.toHaveBeenCalled();
+    expect(mockSendPrivateReplyWithLinkButton).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        commentId: "comment_reply_777",
+        status: "SKIPPED_DEDUP",
+      }),
+    });
+  });
+
+  it("still fires when a different person replies inside that thread", async () => {
+    logsByCommentId({
+      comment_555: { commenterId: "someone_else", status: "SENT" },
+    });
+
+    const processor = getProcessor();
+    await processor(createMockJob(replyJobData));
+
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("still fires on a reply whose parent thread was never answered", async () => {
+    logsByCommentId({});
+
+    const processor = getProcessor();
+    await processor(createMockJob(replyJobData));
+
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a top-level comment untouched by the guard", async () => {
+    logsByCommentId({});
+
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+    // No parent to look up: only the comment's own log is read.
+    expect(mockPrisma.dmLog.findUnique).toHaveBeenCalledTimes(1);
   });
 });

@@ -53,6 +53,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     commenterId,
     commenterName,
     mediaId,
+    parentCommentId,
   } = job.data;
   const requeueAttempt = job.data.requeueAttempt ?? 0;
 
@@ -101,6 +102,52 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         },
       },
     });
+
+    // Thread follow-ups. Instagram flattens comment threads, so when someone
+    // replies to the campaign's public reply, that arrives as a brand new
+    // comment (new id, new webhook, and the media comments edge lists it right
+    // next to the top-level ones). Dedup is keyed on commentId, so without this
+    // guard a "thanks, got it!" re-fires the whole campaign: a second public
+    // reply and a second DM to someone who was already served.
+    //
+    // Only the original commenter's own follow-ups are suppressed. A different
+    // person replying inside that same thread is asking for the link for the
+    // first time and still gets it.
+    if (parentCommentId) {
+      const parentLog = await prisma.dmLog.findUnique({
+        where: {
+          automationId_commentId: {
+            automationId: automation.id,
+            commentId: parentCommentId,
+          },
+        },
+        select: { commenterId: true },
+      });
+
+      if (parentLog && parentLog.commenterId === commenterId) {
+        // Record the skip so it reads as a decision in the logs rather than a
+        // comment the tool missed. Never overwrite an existing row: a reply
+        // that already fired before this guard existed keeps its history.
+        if (!existingLog) {
+          await prisma.dmLog.create({
+            data: {
+              workspaceId: automation.workspaceId,
+              automationId: automation.id,
+              instagramAccountId: automation.instagramAccountId,
+              commenterId,
+              commenterName,
+              commentText,
+              commentId,
+              matchedKeyword: matchResult.matchedKeyword,
+              status: "SKIPPED_DEDUP",
+              errorMessage:
+                "Follow-up reply in a thread this campaign already answered",
+            },
+          });
+        }
+        continue;
+      }
+    }
 
     const alreadyDmd = existingLog?.status === "SENT";
     const alreadyPublicReplied = Boolean(existingLog?.publicReplySentAt);

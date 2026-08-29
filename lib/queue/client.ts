@@ -29,6 +29,9 @@ export interface ProcessCommentJob {
   commenterId: string;
   commenterName?: string;
   mediaId: string;
+  // Top-level comment this one replies to, when it is a thread reply.
+  // Absent for top-level comments.
+  parentCommentId?: string | null;
   requeueAttempt?: number;
   // Which path enqueued this comment. Recorded in the shared ProcessedComment
   // dedup store so the reconciler can tell webhook- from polling-caught comments.

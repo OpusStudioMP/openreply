@@ -39,6 +39,11 @@ export interface WebhookCommentEvent {
   commenterId: string;
   commenterName?: string;
   mediaId: string;
+  // Set when the comment is a reply inside a thread. Instagram flattens
+  // threads, so this is always the top-level comment even when the user
+  // replied to a reply. Used by the worker to tell a follow-up apart from a
+  // fresh request (see processComment).
+  parentCommentId?: string;
 }
 
 interface WebhookEntry {
@@ -58,6 +63,7 @@ interface WebhookEntry {
         id?: string;
       };
       media_id?: string;
+      parent_id?: string;
     };
   }>;
   messaging?: Array<{
@@ -99,9 +105,9 @@ export function parseCommentEvents(payload: WebhookPayload): WebhookCommentEvent
         continue;
       }
 
-      // Skip the connected account's own comments and comment replies.
-      // A private reply to yourself is rejected by Meta, so queueing one
-      // only produces a failed log and wasted retries.
+      // Skip the connected account's own comments (including its own public
+      // replies). A private reply to yourself is rejected by Meta, so queueing
+      // one only produces a failed log and wasted retries.
       if (commenterId === entry.id) {
         continue;
       }
@@ -113,6 +119,7 @@ export function parseCommentEvents(payload: WebhookPayload): WebhookCommentEvent
         commenterId,
         commenterName: value.from?.username,
         mediaId,
+        parentCommentId: value.parent_id,
       });
     }
   }

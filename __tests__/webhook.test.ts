@@ -285,3 +285,42 @@ describe("parseCommentEvents", () => {
     expect(events).toHaveLength(0);
   });
 });
+
+
+describe("parseCommentEvents — thread replies", () => {
+  function payload(value: Record<string, unknown>) {
+    return {
+      object: "instagram",
+      entry: [{ id: "ig_account_1", time: 1, changes: [{ field: "comments", value }] }],
+    };
+  }
+
+  it("carries parent_id through as parentCommentId", () => {
+    const events = parseCommentEvents(
+      payload({
+        id: "comment_reply_2",
+        text: "@account thanks!",
+        from: { id: "commenter_9", username: "someone" },
+        media: { id: "media_1" },
+        parent_id: "comment_top_1",
+      }) as Parameters<typeof parseCommentEvents>[0]
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0].parentCommentId).toBe("comment_top_1");
+  });
+
+  it("leaves parentCommentId undefined for a top-level comment", () => {
+    const events = parseCommentEvents(
+      payload({
+        id: "comment_top_1",
+        text: "tokeni",
+        from: { id: "commenter_9", username: "someone" },
+        media: { id: "media_1" },
+      }) as Parameters<typeof parseCommentEvents>[0]
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0].parentCommentId).toBeUndefined();
+  });
+});
