@@ -109,6 +109,7 @@ Optional, for tuning the polling reconciler (defaults are fine to start):
 | `COMMENT_POLL_INTERVAL_MS` | `300000` | How often the worker sweeps for missed comments (5 min). |
 | `COMMENT_POLL_MAX_PER_SWEEP` | `30` | Max new comments each campaign acts on per sweep. Keep it conservative; higher gets closer to Instagram's rate limits. |
 | `COMMENT_POLL_LOOKBACK_HOURS` | `72` | How far back a sweep considers comments. |
+| `LEGACY_POSTBACK_REPLY` | unset | Worker only. The DM sent when someone taps a button OpenReply did not send, for example from an old ManyChat message. Sent at most once per person per day, and each tap is logged as a warning on the diagnostics page. Unset means those taps are ignored. |
 
 ## The Meta app
 

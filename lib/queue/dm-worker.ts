@@ -34,6 +34,8 @@ import {
 } from "@/lib/tracking/message";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
+// A person tapping an old button repeatedly gets the legacy reply once a day.
+const LEGACY_POSTBACK_DEDUPE_SECONDS = 24 * 60 * 60;
 
 function formatError(error: unknown): string {
   if (error instanceof MetaApiError) {
@@ -514,7 +516,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   const { instagramAccountId, userId, payload } = job.data;
 
-  if (!payload.startsWith("reveal:")) return;
+  if (!payload.startsWith("reveal:")) return replyToLegacyPostback(job);
   const automationId = payload.slice("reveal:".length);
 
   const automation = await prisma.automation.findFirst({
@@ -734,6 +736,67 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       update: { status: "FAILED", errorMessage: formatError(error) },
     });
     throw error;
+  }
+}
+
+/**
+ * Answer a tap on a button OpenReply never sent, typically from a DM another
+ * tool (e.g. ManyChat) sent before the switch. Its payload maps to no campaign,
+ * so the tapper gets the fixed LEGACY_POSTBACK_REPLY instead of silence. Unset
+ * means those taps stay ignored. Each tap is also logged as a WARNING so it
+ * shows on the diagnostics page for a manual follow-up.
+ */
+async function replyToLegacyPostback(job: Job<ProcessPostbackJob>): Promise<void> {
+  const { instagramAccountId, userId, payload } = job.data;
+  const message = process.env.LEGACY_POSTBACK_REPLY?.trim();
+  if (!message) return;
+
+  const account = await prisma.instagramAccount.findUnique({
+    where: { instagramId: instagramAccountId },
+    select: { workspaceId: true, instagramId: true, accessToken: true },
+  });
+  if (!account?.accessToken) return;
+
+  const dedupeKey = `legacy-postback:${instagramAccountId}:${userId}`;
+  const claimed = await getRedisConnection().set(
+    dedupeKey,
+    "1",
+    "EX",
+    LEGACY_POSTBACK_DEDUPE_SECONDS,
+    "NX"
+  );
+  if (claimed !== "OK") return;
+
+  let accessToken: string;
+  try {
+    accessToken = decryptToken(account.accessToken);
+  } catch {
+    return;
+  }
+
+  try {
+    await sendDirectMessage(accessToken, account.instagramId, userId, message);
+  } catch (error) {
+    // Release the claim so BullMQ's retry can still deliver the reply.
+    await getRedisConnection().del(dedupeKey);
+    throw error;
+  }
+
+  try {
+    await prisma.operationalEvent.create({
+      data: {
+        workspaceId: account.workspaceId,
+        source: "WORKER",
+        level: "WARNING",
+        message: `Old DM button tapped by user ${userId}; sent the legacy reply, follow up manually`,
+        payload: { instagramAccountId, userId, payload },
+      },
+    });
+  } catch (recordError) {
+    console.error(
+      "[DM Worker] Failed to record legacy postback:",
+      formatError(recordError)
+    );
   }
 }
 

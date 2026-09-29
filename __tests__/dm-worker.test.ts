@@ -10,10 +10,13 @@ const {
   mockQueueAdd,
   mockReserveWorkspaceDMSend,
   mockReleaseWorkspaceDMReservation,
+  mockSendDirectMessage,
+  mockRedis,
 } = vi.hoisted(() => ({
   mockPrisma: {
     automation: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
     },
     dmLog: {
       findUnique: vi.fn(),
@@ -36,6 +39,11 @@ const {
   mockQueueAdd: vi.fn(),
   mockReserveWorkspaceDMSend: vi.fn(),
   mockReleaseWorkspaceDMReservation: vi.fn(),
+  mockSendDirectMessage: vi.fn(),
+  mockRedis: {
+    set: vi.fn(),
+    del: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/db/client", () => ({
@@ -46,7 +54,7 @@ vi.mock("@/lib/meta/client", () => ({
   sendPrivateReply: mockSendPrivateReply,
   sendPrivateReplyWithLinkButton: mockSendPrivateReplyWithLinkButton,
   sendPrivateReplyWithButton: vi.fn(),
-  sendDirectMessage: vi.fn(),
+  sendDirectMessage: mockSendDirectMessage,
   sendDirectMessageWithLinkButton: vi.fn(),
   sendCommentReply: vi.fn(),
   MetaApiError: class MetaApiError extends Error {
@@ -89,7 +97,7 @@ vi.mock("@/lib/queue/client", () => ({
   getDMQueue: () => ({
     add: mockQueueAdd,
   }),
-  getRedisConnection: vi.fn(),
+  getRedisConnection: () => mockRedis,
   POSTBACK_JOB_NAME: "process-postback",
 }));
 
@@ -541,5 +549,93 @@ describe("DM Worker — thread replies", () => {
     expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
     // No parent to look up: only the comment's own log is read.
     expect(mockPrisma.dmLog.findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DM Worker — legacy button taps", () => {
+  const LEGACY_REPLY = "This button is from an old message.";
+
+  function createPostbackJob(payload: string) {
+    return {
+      name: "process-postback",
+      data: { instagramAccountId: "ig_456", userId: "tapper_1", payload },
+      id: "job_postback",
+      attemptsMade: 0,
+    } as unknown as ReturnType<typeof createMockJob>;
+  }
+
+  beforeEach(() => {
+    process.env.LEGACY_POSTBACK_REPLY = LEGACY_REPLY;
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+      workspaceId: "workspace_123",
+      instagramId: "ig_456",
+      accessToken: "encrypted_token_abc",
+    });
+    mockPrisma.automation.findFirst.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue("OK");
+    mockRedis.del.mockResolvedValue(1);
+    mockSendDirectMessage.mockResolvedValue({ message_id: "msg_legacy" });
+  });
+
+  it("replies to a tap on a button OpenReply did not send", async () => {
+    const processor = getProcessor();
+    await processor(createPostbackJob("ACT::d7c01c11aa91befd9d1718727da6b0f1"));
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "tapper_1",
+      LEGACY_REPLY
+    );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      "legacy-postback:ig_456:tapper_1",
+      "1",
+      "EX",
+      86400,
+      "NX"
+    );
+    expect(mockPrisma.operationalEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ level: "WARNING", source: "WORKER" }),
+      })
+    );
+  });
+
+  it("replies only once a day to the same person", async () => {
+    mockRedis.set.mockResolvedValue(null);
+
+    const processor = getProcessor();
+    await processor(createPostbackJob("ACT::d7c01c11aa91befd9d1718727da6b0f1"));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when no legacy reply is configured", async () => {
+    delete process.env.LEGACY_POSTBACK_REPLY;
+
+    const processor = getProcessor();
+    await processor(createPostbackJob("ACT::d7c01c11aa91befd9d1718727da6b0f1"));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockRedis.set).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim and re-throws when the send fails", async () => {
+    mockSendDirectMessage.mockRejectedValue(new Error("Meta down"));
+
+    const processor = getProcessor();
+    await expect(
+      processor(createPostbackJob("ACT::d7c01c11aa91befd9d1718727da6b0f1"))
+    ).rejects.toThrow("Meta down");
+
+    expect(mockRedis.del).toHaveBeenCalledWith("legacy-postback:ig_456:tapper_1");
+  });
+
+  it("never sends the legacy reply for OpenReply's own reveal buttons", async () => {
+    const processor = getProcessor();
+    await processor(createPostbackJob("reveal:auto_789"));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockRedis.set).not.toHaveBeenCalled();
   });
 });
