@@ -12,7 +12,16 @@ export const prepareSchema = z.object({
   guideUrl,
   keywords: z.array(z.string().trim().min(1).max(50)).min(1).max(10),
   dmMessage: z.string().trim().min(1).max(1000).refine((v) => v.includes("{link}")),
-}).strict();
+  // Optional campaign flow, same fields the campaign builder writes. The follow
+  // gate runs on the opening DM's button tap, so it requires the opening DM.
+  openingDmMessage: z.string().trim().min(1).max(1000).optional(),
+  openingDmButtonLabel: z.string().trim().min(1).max(64).optional(),
+  linkButtonLabel: z.string().trim().min(1).max(20).optional(),
+  followGateMessage: z.string().trim().min(1).max(1000).optional(),
+  publicReplyMessages: z.array(z.string().trim().min(1).max(1000)).min(1).max(10).optional(),
+}).strict()
+  .refine((b) => !b.openingDmMessage === !b.openingDmButtonLabel, { message: "Opening DM needs a message and a button label" })
+  .refine((b) => !b.followGateMessage || Boolean(b.openingDmMessage), { message: "Follow gate needs the opening DM" });
 export const activateSchema = z.object({
   key: z.string().min(1).max(160),
   instagramId: z.string().regex(/^\d+$/),

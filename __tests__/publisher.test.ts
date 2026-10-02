@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authorizedPublisher, publisherId, publisherSecret } from "@/lib/publisher-contract";
-const mocks=vi.hoisted(()=>({findAccount:vi.fn(),findUnique:vi.fn(),findFirst:vi.fn(),upsert:vi.fn(),updateMany:vi.fn()}));
-vi.mock("@/lib/db/client",()=>({prisma:{instagramAccount:{findFirst:mocks.findAccount},automation:{findUnique:mocks.findUnique,findFirst:mocks.findFirst,upsert:mocks.upsert,updateMany:mocks.updateMany}}}));
+const mocks=vi.hoisted(()=>({findAccount:vi.fn(),findUnique:vi.fn(),findFirst:vi.fn(),upsert:vi.fn(),update:vi.fn(),updateMany:vi.fn()}));
+vi.mock("@/lib/db/client",()=>({prisma:{instagramAccount:{findFirst:mocks.findAccount},automation:{findUnique:mocks.findUnique,findFirst:mocks.findFirst,upsert:mocks.upsert,update:mocks.update,updateMany:mocks.updateMany}}}));
 vi.mock("@/lib/meta/oauth",()=>({decryptToken:()=>"test-token"}));
 import { POST, PATCH } from "@/app/api/publisher/route";
 const secret="test-secret-with-at-least-32-characters";
@@ -41,6 +41,29 @@ describe("publisher integration",()=>{
     expect((await POST(request("POST",payload))).status).toBe(409);
     mocks.findFirst.mockResolvedValue({id:publisherId(payload.key),postId:null,trackedLinks:[{destinationUrl:guide}]});
     expect((await PATCH(request("PATCH",{key:payload.key,instagramId:"222",postId:"999"}))).status).toBe(409);expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+  it("stores the opening DM, follow gate and public replies like the campaign builder",async()=>{
+    const flow={...payload,keywords:["PRIVATNO","privatno","Privatno"],openingDmMessage:"Pozdrav!",openingDmButtonLabel:"Pošalji upute!",linkButtonLabel:"Upute",followGateMessage:"Zaprati me pa klikni opet.",publicReplyMessages:["Provjeri inbox!","Provjeri poruke!"]};
+    mocks.upsert.mockImplementationOnce(async(args:{create:Record<string,unknown>})=>({...args.create,trackedLinks:[{slug:"test",destinationUrl:guide}]}));
+    expect((await POST(request("POST",flow))).status).toBe(200);
+    expect(mocks.upsert.mock.calls[0][0].create).toMatchObject({openingDmEnabled:true,openingDmButtonLabel:"Pošalji upute!",followGateEnabled:true,followGateMessage:"Zaprati me pa klikni opet.",publicReplyEnabled:true,publicReplyMessage:"Provjeri inbox!",publicReplyMessages:["Provjeri inbox!","Provjeri poruke!"],keywords:["PRIVATNO","privatno","Privatno"],isActive:false});
+  });
+  it("rejects a follow gate without the opening DM it runs on",async()=>{
+    expect((await POST(request("POST",{...payload,followGateMessage:"Zaprati me."}))).status).toBe(400);
+    expect((await POST(request("POST",{...payload,openingDmMessage:"Pozdrav!"}))).status).toBe(400);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+  it("revises a prepared, unbound campaign but never a live one",async()=>{
+    const prepared={id:publisherId(payload.key),isActive:false,postId:null,instagramAccountId:"creator",workspaceId:"workspace",name:payload.name,dmMessage:payload.dmMessage,keywords:payload.keywords,trackedLinks:[{slug:"test",destinationUrl:guide}]};
+    const flow={...payload,openingDmMessage:"Pozdrav!",openingDmButtonLabel:"Pošalji upute!",followGateMessage:"Zaprati me.",publicReplyMessages:["Provjeri inbox!"]};
+    mocks.findUnique.mockResolvedValue(prepared);
+    mocks.update.mockImplementationOnce(async(args:{data:Record<string,unknown>})=>({...prepared,...args.data}));
+    expect((await POST(request("POST",flow))).status).toBe(200);
+    expect(mocks.update.mock.calls[0][0].data).toMatchObject({followGateEnabled:true,publicReplyEnabled:true});expect(mocks.upsert).not.toHaveBeenCalled();
+    mocks.findUnique.mockResolvedValue({...prepared,isActive:true,postId:"333"});
+    expect((await POST(request("POST",flow))).status).toBe(409);expect(mocks.update).toHaveBeenCalledTimes(1);
+    mocks.findUnique.mockResolvedValue({...prepared,trackedLinks:[{slug:"test",destinationUrl:"https://opus-studio.xyz/hr/vodici/other"}]});
+    expect((await POST(request("POST",flow))).status).toBe(409);
   });
   it("activates only after verifying the actual post; cannot rebind",async()=>{
     mocks.findFirst.mockResolvedValue({id:publisherId(payload.key),postId:null,trackedLinks:[{destinationUrl:guide}]});

@@ -5,6 +5,7 @@ import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { decryptToken } from "@/lib/meta/oauth";
 import { getMetaGraphApiVersion } from "@/lib/env";
+import type { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,38 @@ async function account(instagramId: string) {
 function result(automation: { id: string; isActive: boolean; postId: string | null; trackedLinks: { slug: string }[] }) {
   return { id: automation.id, active: automation.isActive, postId: automation.postId,
     trackedUrl: automation.trackedLinks[0] ? buildTrackedUrl(automation.trackedLinks[0].slug) : null };
+}
+
+// The campaign fields a package controls, in the same shape the campaign
+// builder stores (follow gate only with the opening DM; first public reply
+// mirrored into the legacy single-message column).
+function campaignContent(b: z.infer<typeof prepareSchema>) {
+  const opening = Boolean(b.openingDmMessage && b.openingDmButtonLabel);
+  const replies = b.publicReplyMessages ?? [];
+  return {
+    name: b.name, keywords: b.keywords, dmMessage: b.dmMessage,
+    openingDmEnabled: opening,
+    openingDmMessage: opening ? b.openingDmMessage! : null,
+    openingDmButtonLabel: opening ? b.openingDmButtonLabel! : null,
+    linkButtonLabel: b.linkButtonLabel ?? null,
+    followGateEnabled: opening && Boolean(b.followGateMessage),
+    followGateMessage: opening && b.followGateMessage ? b.followGateMessage : null,
+    publicReplyEnabled: replies.length > 0,
+    publicReplyMessage: replies[0] ?? null,
+    publicReplyMessages: replies,
+  };
+}
+type CampaignContent = ReturnType<typeof campaignContent>;
+function sameContent(row: Partial<Record<keyof CampaignContent, unknown>>, c: CampaignContent) {
+  const norm = (r: Partial<Record<keyof CampaignContent, unknown>>) => JSON.stringify({
+    name: r.name, keywords: r.keywords, dmMessage: r.dmMessage,
+    openingDmEnabled: r.openingDmEnabled ?? false, openingDmMessage: r.openingDmMessage ?? null,
+    openingDmButtonLabel: r.openingDmButtonLabel ?? null, linkButtonLabel: r.linkButtonLabel ?? null,
+    followGateEnabled: r.followGateEnabled ?? false, followGateMessage: r.followGateMessage ?? null,
+    publicReplyEnabled: r.publicReplyEnabled ?? false, publicReplyMessage: r.publicReplyMessage ?? null,
+    publicReplyMessages: r.publicReplyMessages ?? [],
+  });
+  return norm(row) === norm(c);
 }
 
 export async function GET(request: Request) {
@@ -40,24 +73,30 @@ export async function POST(request: Request) {
   try { await verifyGuide(b.guideUrl); }
   catch { return Response.json({ error: "Guide is not publicly ready" }, { status: 409 }); }
   const id = publisherId(b.key);
+  const content = campaignContent(b);
   const existing = await prisma.automation.findUnique({ where: { id }, include: { trackedLinks: true } });
   if (existing && (existing.instagramAccountId !== ig.id || existing.workspaceId !== ig.workspaceId
-    || existing.name !== b.name || existing.dmMessage !== b.dmMessage
-    || JSON.stringify(existing.keywords) !== JSON.stringify(b.keywords)
     || existing.trackedLinks[0]?.destinationUrl !== b.guideUrl)) {
     return Response.json({ error: "This package key already has different content" }, { status: 409 });
   }
+  if (existing && !sameContent(existing, content)) {
+    // A prepared campaign may still be revised (e.g. adding the follow gate)
+    // until it is activated on a real post. Live campaigns never change here.
+    if (existing.isActive || existing.postId) {
+      return Response.json({ error: "This package key already has different content" }, { status: 409 });
+    }
+    const revised = await prisma.automation.update({ where: { id }, data: content, include: { trackedLinks: true } });
+    return Response.json(result(revised));
+  }
   const automation = await prisma.automation.upsert({
     where: { id }, update: {},
-    create: { id, name: b.name, workspaceId: ig.workspaceId, instagramAccountId: ig.id,
-      keywords: b.keywords, dmMessage: b.dmMessage, isActive: false,
+    create: { id, workspaceId: ig.workspaceId, instagramAccountId: ig.id, ...content, isActive: false,
       pendingNextReel: false, matchAnyPost: false, matchAnyWord: false, wholeWordMatch: true,
       trackedLinks: { create: { workspaceId: ig.workspaceId, slug: generateTrackedLinkSlug(), destinationUrl: b.guideUrl, label: b.name } } },
     include: { trackedLinks: true },
   });
-  if (automation.instagramAccountId !== ig.id || automation.workspaceId !== ig.workspaceId || automation.name !== b.name
-    || automation.dmMessage !== b.dmMessage || JSON.stringify(automation.keywords) !== JSON.stringify(b.keywords)
-    || automation.trackedLinks[0]?.destinationUrl !== b.guideUrl) {
+  if (automation.instagramAccountId !== ig.id || automation.workspaceId !== ig.workspaceId
+    || !sameContent(automation, content) || automation.trackedLinks[0]?.destinationUrl !== b.guideUrl) {
     return Response.json({ error: "Concurrent package content conflict" }, { status: 409 });
   }
   return Response.json(result(automation));
