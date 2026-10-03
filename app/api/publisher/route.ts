@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/client";
-import { authorizedPublisher, activateSchema, prepareSchema, publisherId, verifyGuide, publisherSecret } from "@/lib/publisher-contract";
+import { authorizedPublisher, activateSchema, prepareSchema, publisherId, verifyGuide, publisherSecret, currentGuideUrl, sameGuide } from "@/lib/publisher-contract";
 import { CREATOR_ACCOUNT_ID } from "@/lib/publisher-scope";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { buildTrackedUrl } from "@/lib/tracking/message";
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
   const content = campaignContent(b);
   const existing = await prisma.automation.findUnique({ where: { id }, include: { trackedLinks: true } });
   if (existing && (existing.instagramAccountId !== ig.id || existing.workspaceId !== ig.workspaceId
-    || existing.trackedLinks[0]?.destinationUrl !== b.guideUrl)) {
+    || !sameGuide(existing.trackedLinks[0]?.destinationUrl, b.guideUrl))) {
     return Response.json({ error: "This package key already has different content" }, { status: 409 });
   }
   if (existing && !sameContent(existing, content)) {
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
     include: { trackedLinks: true },
   });
   if (automation.instagramAccountId !== ig.id || automation.workspaceId !== ig.workspaceId
-    || !sameContent(automation, content) || automation.trackedLinks[0]?.destinationUrl !== b.guideUrl) {
+    || !sameContent(automation, content) || !sameGuide(automation.trackedLinks[0]?.destinationUrl, b.guideUrl)) {
     return Response.json({ error: "Concurrent package content conflict" }, { status: 409 });
   }
   return Response.json(result(automation));
@@ -116,7 +116,9 @@ export async function PATCH(request: Request) {
   if (!automation) return Response.json({ error: "Prepared campaign not found" }, { status: 404 });
   if (automation.postId && automation.postId !== b.postId) return Response.json({ error: "Campaign is already bound to another post" }, { status: 409 });
   try {
-    await verifyGuide(automation.trackedLinks[0]?.destinationUrl ?? "");
+    const link = automation.trackedLinks[0];
+    const destination = link ? currentGuideUrl(link.destinationUrl) : "";
+    await verifyGuide(destination);
     // Confirm ownership through the account's media edge. A caller-supplied ID
     // alone must never activate a campaign for another profile's post.
     const token = decryptToken(ig.accessToken);
@@ -127,6 +129,11 @@ export async function PATCH(request: Request) {
     const media = await response.json();
     const post = response.ok && media.data?.find((p: { id: string }) => p.id === b.postId);
     if (!post) return Response.json({ error: "Published post is not visible on the creator account yet" }, { status: 409 });
+    // Campaigns prepared before the 2026-10-03 move point at /hr/vodici/<slug>, which now
+    // redirects. Move the link to the URL just verified so the DM lands without a hop.
+    if (link && destination !== link.destinationUrl) {
+      await prisma.trackedLink.updateMany({ where: { automationId: id, destinationUrl: link.destinationUrl }, data: { destinationUrl: destination } });
+    }
     const updated = await prisma.automation.updateMany({
       where: { id, instagramAccountId: ig.id, OR: [{ postId: null }, { postId: b.postId }] },
       data: { postId: b.postId, postUrl: post.permalink, isActive: true, pendingNextReel: false, matchAnyPost: false },

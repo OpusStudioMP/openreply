@@ -1,10 +1,23 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+// opus-studio.xyz moved Croatian to the root on 2026-10-03: guides live at /vodici/<slug>
+// and the old /hr/vodici/<slug> answers with a 301. Packages and prepared campaigns from
+// before the move still carry the /hr form, so it is accepted and rewritten to the current
+// URL (verifyGuide refuses redirects, so the old form could never be activated).
+const GUIDE_PATH = /^\/(?:hr\/)?vodici\/([a-z0-9]+(?:-[a-z0-9]+)*)$/;
+export function currentGuideUrl(value: string) {
+  const slug = new URL(value).pathname.match(GUIDE_PATH)?.[1];
+  return slug ? `https://opus-studio.xyz/vodici/${slug}` : value;
+}
+export function sameGuide(stored: string | undefined, guide: string) {
+  if (!stored) return false;
+  try { return currentGuideUrl(stored) === currentGuideUrl(guide); } catch { return false; }
+}
 export const guideUrl = z.string().url().refine((value) => {
   const u = new URL(value);
-  return u.origin === "https://opus-studio.xyz" && /^\/hr\/vodici\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(u.pathname) && !u.search && !u.hash;
-});
+  return u.origin === "https://opus-studio.xyz" && GUIDE_PATH.test(u.pathname) && !u.search && !u.hash;
+}).transform(currentGuideUrl);
 export const prepareSchema = z.object({
   key: z.string().min(1).max(160),
   instagramId: z.string().regex(/^\d+$/),
@@ -46,7 +59,8 @@ export function publisherSecret() {
 }
 
 export async function verifyGuide(url: string) {
-  if (!guideUrl.safeParse(url).success) throw new Error("Invalid guide URL");
+  const parsed = guideUrl.safeParse(url);
+  if (!parsed.success || parsed.data !== url) throw new Error("Invalid guide URL");
   const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000), cache: "no-store" });
   const html = await response.text();
   const canonical = html.match(/<link\b[^>]*rel=["']canonical["'][^>]*>/i)?.[0];

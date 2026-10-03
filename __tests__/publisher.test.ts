@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedPublisher, publisherId, publisherSecret } from "@/lib/publisher-contract";
-const mocks=vi.hoisted(()=>({findAccount:vi.fn(),findUnique:vi.fn(),findFirst:vi.fn(),upsert:vi.fn(),update:vi.fn(),updateMany:vi.fn()}));
-vi.mock("@/lib/db/client",()=>({prisma:{instagramAccount:{findFirst:mocks.findAccount},automation:{findUnique:mocks.findUnique,findFirst:mocks.findFirst,upsert:mocks.upsert,update:mocks.update,updateMany:mocks.updateMany}}}));
+import { authorizedPublisher, publisherId, publisherSecret, verifyGuide } from "@/lib/publisher-contract";
+const mocks=vi.hoisted(()=>({findAccount:vi.fn(),findUnique:vi.fn(),findFirst:vi.fn(),upsert:vi.fn(),update:vi.fn(),updateMany:vi.fn(),linkUpdateMany:vi.fn()}));
+vi.mock("@/lib/db/client",()=>({prisma:{instagramAccount:{findFirst:mocks.findAccount},automation:{findUnique:mocks.findUnique,findFirst:mocks.findFirst,upsert:mocks.upsert,update:mocks.update,updateMany:mocks.updateMany},trackedLink:{updateMany:mocks.linkUpdateMany}}}));
 vi.mock("@/lib/meta/oauth",()=>({decryptToken:()=>"test-token"}));
 import { POST, PATCH } from "@/app/api/publisher/route";
 const secret="test-secret-with-at-least-32-characters";
-const guide="https://opus-studio.xyz/hr/vodici/test-guide";
+const guide="https://opus-studio.xyz/vodici/test-guide";
+const legacyGuide="https://opus-studio.xyz/hr/vodici/test-guide";
 const payload={key:"test-package",instagramId:"222",name:"Test",guideUrl:guide,keywords:["VODIČ"],dmMessage:"Evo: {link}"};
 const request=(method:string,body:unknown,auth=true)=>new Request("https://openreply.test/api/publisher",{method,headers:{"content-type":"application/json",...(auth?{Authorization:`Bearer ${secret}`}:{})},body:JSON.stringify(body)});
 beforeEach(()=>{
   vi.clearAllMocks();process.env.PUBLISHER_SECRET=secret;process.env.PUBLISHER_INSTAGRAM_ACCOUNT_ID="creator";
   mocks.findAccount.mockResolvedValue({id:"creator",instagramId:"222",username:"markopejic.ai",workspaceId:"workspace",accessToken:"encrypted"});
-  mocks.findUnique.mockResolvedValue(null);mocks.updateMany.mockResolvedValue({count:1});
+  mocks.findUnique.mockResolvedValue(null);mocks.updateMany.mockResolvedValue({count:1});mocks.linkUpdateMany.mockResolvedValue({count:1});
   mocks.upsert.mockResolvedValue({id:publisherId(payload.key),isActive:false,postId:null,instagramAccountId:"creator",workspaceId:"workspace",name:payload.name,dmMessage:payload.dmMessage,keywords:payload.keywords,trackedLinks:[{slug:"test",destinationUrl:guide}]});
   vi.stubGlobal("fetch",vi.fn(async(url)=>String(url).startsWith("https://opus-studio.xyz")?new Response(`<link rel="canonical" href="${guide}"><h1>Test</h1><article class="cx-prose">Guide</article>`,{headers:{"content-type":"text/html"}}):Response.json({data:[{id:"333",permalink:"https://www.instagram.com/reel/test/"}]})));
 });
@@ -77,5 +78,20 @@ describe("publisher integration",()=>{
     expect((await PATCH(request("PATCH",{key:payload.key,instagramId:"222",postId:"333"}))).status).toBe(200);
     expect(mocks.updateMany.mock.calls[0][0].data).toMatchObject({postId:"333",isActive:true,pendingNextReel:false,matchAnyPost:false});
     mocks.findFirst.mockResolvedValue({postId:"different",trackedLinks:[]});expect((await PATCH(request("PATCH",{key:payload.key,instagramId:"222",postId:"333"}))).status).toBe(409);
+  });
+  it("accepts a package carrying the pre-move /hr/vodici URL and stores the current one",async()=>{
+    expect((await POST(request("POST",{...payload,guideUrl:legacyGuide}))).status).toBe(200);
+    expect(mocks.upsert.mock.calls[0][0].create.trackedLinks.create.destinationUrl).toBe(guide);
+  });
+  it("activates a campaign prepared with the pre-move URL and moves its link to the current one",async()=>{
+    mocks.findFirst.mockResolvedValue({id:publisherId(payload.key),postId:null,trackedLinks:[{id:"link1",destinationUrl:legacyGuide}]});
+    expect((await PATCH(request("PATCH",{key:payload.key,instagramId:"222",postId:"333"}))).status).toBe(200);
+    const fetched=(vi.mocked(fetch).mock.calls as unknown as [unknown][]).map(([u])=>String(u));
+    expect(fetched).toContain(guide);expect(fetched).not.toContain(legacyGuide);
+    expect(mocks.linkUpdateMany.mock.calls[0][0]).toMatchObject({where:{destinationUrl:legacyGuide},data:{destinationUrl:guide}});
+    expect(mocks.updateMany).toHaveBeenCalledTimes(1);
+  });
+  it("never verifies a redirecting pre-move URL directly",async()=>{
+    await expect(verifyGuide(legacyGuide)).rejects.toThrow("Invalid guide URL");
   });
 });
