@@ -63,6 +63,10 @@ export async function GET(request: Request) {
 
 // Preparation never activates or guesses the next reel. The stable key is
 // deterministic and unique at the database level, including concurrent retries.
+// The guide is NOT required to be public yet: Marko's rule (2026-10-03) is that
+// a guide goes live only after its video does, so the publisher stages the
+// inactive campaign first and PATCH (activation) is where the live guide is
+// verified.
 export async function POST(request: Request) {
   if (denied(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const parsed = prepareSchema.safeParse(await request.json().catch(() => null));
@@ -70,8 +74,6 @@ export async function POST(request: Request) {
   const b = parsed.data;
   const ig = await account(b.instagramId);
   if (!ig) return Response.json({ error: "Creator account does not match" }, { status: 403 });
-  try { await verifyGuide(b.guideUrl); }
-  catch { return Response.json({ error: "Guide is not publicly ready" }, { status: 409 }); }
   const id = publisherId(b.key);
   const content = campaignContent(b);
   const existing = await prisma.automation.findUnique({ where: { id }, include: { trackedLinks: true } });

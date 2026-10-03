@@ -33,8 +33,15 @@ describe("publisher integration",()=>{
   it("rejects inaccessible or foreign materials and mismatching accounts",async()=>{
     expect((await POST(request("POST",{...payload,guideUrl:"https://docs.google.com/test"}))).status).toBe(400);
     mocks.findAccount.mockResolvedValueOnce(null);expect((await POST(request("POST",payload))).status).toBe(403);
-    vi.stubGlobal("fetch",vi.fn(async()=>new Response('Login',{status:200,headers:{'content-type':'text/html'}})));
-    expect((await POST(request("POST",payload))).status).toBe(409);expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+  it("prepares before the guide is public but activates only once it is",async()=>{
+    vi.stubGlobal("fetch",vi.fn(async(url)=>String(url).startsWith("https://opus-studio.xyz")?new Response('Not found',{status:404,headers:{'content-type':'text/html'}}):Response.json({data:[{id:"333",permalink:"https://www.instagram.com/reel/test/"}]})));
+    expect((await POST(request("POST",payload))).status).toBe(200);
+    expect(mocks.upsert.mock.calls[0][0].create).toMatchObject({isActive:false});
+    mocks.findFirst.mockResolvedValue({id:publisherId(payload.key),postId:null,trackedLinks:[{destinationUrl:guide}]});
+    expect((await PATCH(request("PATCH",{key:payload.key,instagramId:"222",postId:"333"}))).status).toBe(409);
+    expect(mocks.updateMany).not.toHaveBeenCalled();
   });
   it("refuses conflicting retries and another profile's post",async()=>{
     mocks.findUnique.mockResolvedValue({instagramAccountId:"another",workspaceId:"workspace"});
