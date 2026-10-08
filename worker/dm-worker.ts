@@ -1,6 +1,7 @@
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
+import { attachNextReels } from "@/lib/polling/attach-next-reel";
 import os from "node:os";
 
 const worker = createDMWorker();
@@ -31,6 +32,14 @@ void heartbeat();
 const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);
 
 async function poll() {
+  // Bind waiting "next reel" campaigns first, so the sweep below already covers
+  // comments left on a reel before its campaign was attached.
+  try {
+    await attachNextReels();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[DM Worker] Next-reel binding failed:", message);
+  }
   try {
     await reconcileComments();
   } catch (error) {
